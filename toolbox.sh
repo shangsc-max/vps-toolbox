@@ -132,18 +132,28 @@ function manage_ufw() {
             3) read -p "输入端口/协议: " p; ufw allow $p ;;
             4) read -p "输入端口/协议: " p; [[ "$p" != *"$ssh_port"* ]] && ufw delete allow $p ;;
             5) 
-                [ ! -d "/etc/docker" ] && mkdir -p /etc/docker
-                echo -e '{\n  "iptables": false\n}' > /etc/docker/daemon.json
-                systemctl restart docker
-                echo -e "${GREEN}Docker 加固已开启！${NC}" ; sleep 1 ;;
-            6) 
-                if [ -f "/etc/docker/daemon.json" ]; then
-                    rm /etc/docker/daemon.json
-                    systemctl restart docker
-                    echo -e "${YELLOW}Docker 加固已关闭，恢复系统默认。${NC}"
+                if ! command -v docker &> /dev/null; then
+                    echo -e "${RED}错误：系统未安装 Docker，无需加固。${NC}"
                 else
-                    echo -e "当前已是默认状态。"
-                fi ; sleep 1 ;;
+                    [ ! -d "/etc/docker" ] && mkdir -p /etc/docker
+                    echo -e '{\n  "iptables": false\n}' > /etc/docker/daemon.json
+                    systemctl restart docker
+                    echo -e "${GREEN}Docker 加固已开启！${NC}"
+                fi
+                sleep 2 ;;
+            6) 
+                if ! command -v docker &> /dev/null; then
+                    echo -e "${RED}错误：系统未安装 Docker。${NC}"
+                else
+                    if [ -f "/etc/docker/daemon.json" ]; then
+                        rm /etc/docker/daemon.json
+                        systemctl restart docker
+                        echo -e "${YELLOW}Docker 加固已关闭，恢复系统默认。${NC}"
+                    else
+                        echo -e "当前已是默认状态。"
+                    fi
+                fi
+                sleep 2 ;;
             7) ufw status verbose; read -p "按回车继续..." ;;
             0) break ;;
         esac
