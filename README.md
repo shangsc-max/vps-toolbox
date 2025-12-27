@@ -4,4 +4,4 @@
 
 ## 🚀 一键执行链接
 ```bash
-wget -N [https://raw.githubusercontent.com/shang-max/vps-toolbox/main/toolbox.sh](https://raw.githubusercontent.com/shang-max/vps-toolbox/main/toolbox.sh) && chmod +x toolbox.sh && ./toolbox.sh
+wget -N [https://raw.githubusercontent.com/shangsc-max/vps-toolbox/main/toolbox.sh](https://raw.githubusercontent.com/shangsc-max/vps-toolbox/main/toolbox.sh) && chmod +x toolbox.sh && ./toolbox.sh
