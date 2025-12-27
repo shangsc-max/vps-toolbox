@@ -94,15 +94,18 @@ function manage_f2b() {
         read -p "请输入数字选择: " f_opt
         case "$f_opt" in
             1)
-                echo -e "${YELLOW}正在配置...${NC}"
+                echo -e "${YELLOW}正在安装并强制同步服务状态...${NC}"
                 if [ "$OS" == "Alpine" ]; then
                     apk add fail2ban > /dev/null 2>&1
                     rc-update add fail2ban && rc-service fail2ban restart
                 else
-                    apt install -y fail2ban > /dev/null 2>&1
-                    systemctl enable fail2ban && systemctl restart fail2ban
+                    # 针对 Debian/Ubuntu 的卡顿修复：增加非交互式参数并强制重启
+                    DEBIAN_FRONTEND=noninteractive apt install -y fail2ban > /dev/null 2>&1
+                    systemctl unmask fail2ban > /dev/null 2>&1
+                    systemctl enable fail2ban
+                    systemctl restart fail2ban
                 fi
-                echo -e "${GREEN}防御已开启！${NC}"; sleep 2 ;;
+                echo -e "${GREEN}防御配置完成！${NC}"; sleep 2 ;;
             2)
                 fail2ban-client status sshd
                 read -p "按回车继续..." ;;
@@ -112,17 +115,16 @@ function manage_f2b() {
                 else
                     systemctl is-active --quiet fail2ban && systemctl stop fail2ban || systemctl start fail2ban
                 fi
-                echo -e "${GREEN}状态已切换${NC}"; sleep 1 ;;
+                echo -e "${GREEN}操作成功${NC}"; sleep 1 ;;
             4)
                 read -p "输入要解封的 IP: " target_ip
                 fail2ban-client set sshd unbanip $target_ip
                 echo -e "${GREEN}解封指令已发送${NC}"; sleep 1 ;;
             0) break ;;
-            *) echo -e "${RED}输入无效，请重新选择${NC}"; sleep 1 ;;
+            *) echo -e "${RED}输入无效${NC}"; sleep 1 ;;
         esac
     done
 }
-
 # --- 4. 其他功能模块 (保持原样) ---
 function manage_ufw() {
     while true; do
