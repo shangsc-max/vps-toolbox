@@ -18,21 +18,30 @@ function check_env() {
         echo -e "${RED}错误：请使用 root 用户运行！${NC}"
         exit 1
     fi
+    # 始终确保 /usr/local/bin/sm 是最新的
     if [[ "$0" != "/usr/local/bin/sm" ]]; then
         cp "$0" /usr/local/bin/sm
         chmod +x /usr/local/bin/sm
         ln -sf /usr/local/bin/sm /usr/local/bin/SM
     fi
-    apt update -y > /dev/null 2>&1
-    apt install -y curl wget ufw fail2ban lsb-release sed > /dev/null 2>&1
 }
 
-# 获取服务状态的函数
-get_status() {
-    if systemctl is-active --quiet "$1"; then
+# --- 实时获取防火墙状态 ---
+get_ufw_status() {
+    # 使用 ufw status 直接判断，不留缓存
+    if ufw status | grep -q "Status: active"; then
+        echo -e "${GREEN}开启${NC}"
+    else
+        echo -e "${RED}关闭${NC}"
+    fi
+}
+
+# --- 实时获取 Fail2Ban 状态 ---
+get_f2b_status() {
+    if systemctl is-active --quiet fail2ban; then
         echo -e "${GREEN}运行中${NC}"
     else
-        echo -e "${RED}未运行${NC}"
+        echo -e "${RED}已停止${NC}"
     fi
 }
 
@@ -43,12 +52,12 @@ function show_sys_info() {
     echo -e "         ${YELLOW}[SM]${NC} ${GREEN}Shang-Max VPS 全能工具箱${NC}"
     echo -e "${BLUE}==================================================${NC}"
     echo -e "主机名称:   $(hostname)"
-    echo -e "系统版本:   $(lsb_release -d | cut -f2-)"
+    echo -e "系统版本:   $(lsb_release -d | cut -f2- 2>/dev/null || echo "Debian/Ubuntu")"
     echo -e "内存状态:   $(free -m | awk 'NR==2{printf "已用 %sMB / 总共 %sMB", $3,$2}')"
     echo -e "公网 IP:    $(curl -s ifconfig.me)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
-    echo -e "防火墙状态: $(ufw status | head -n1 | grep -q "active" && echo -e "${GREEN}开启${NC}" || echo -e "${RED}关闭${NC}")"
-    echo -e "防爆破状态: $(get_status fail2ban)"
+    echo -e "防火墙状态: $(get_ufw_status)"
+    echo -e "防爆破状态: $(get_f2b_status)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
     echo -e "${GREEN}提示：输入 ${YELLOW}sm${GREEN} 或 ${YELLOW}SM${GREEN} 可随时进入此界面${NC}"
     echo -e "${BLUE}==================================================${NC}"
@@ -57,7 +66,7 @@ function show_sys_info() {
 # --- 3. 更新脚本 ---
 function update_script() {
     echo -e "${YELLOW}正在从 GitHub 获取最新版本...${NC}"
-    wget -O /usr/local/bin/sm https://raw.githubusercontent.com/shangsc-max/vps-toolbox/main/toolbox.sh
+    wget -qO /usr/local/bin/sm https://raw.githubusercontent.com/shangsc-max/vps-toolbox/main/toolbox.sh
     chmod +x /usr/local/bin/sm
     echo -e "${GREEN}脚本更新完成！请直接输入 sm 重新运行。${NC}"
     exit 0
@@ -85,38 +94,38 @@ function github_key() {
 # --- 5. SSH 管理 ---
 function manage_ssh() {
     echo -e "${YELLOW}--- SSH 管理 ---${NC}"
-    echo -e "1. 修改 SSH 端口\n2. 开启密钥登录并禁用密码\n3. 重启 SSH 服务"
+    echo -e "1. 修改 SSH 端口\n2. 开启密钥并禁用密码\n3. 重启 SSH 服务"
     read -p "选择: " opt
     case $opt in
-        1) read -p "新端口: " p; sed -i "s/^#\?Port.*/Port $p/" /etc/ssh/sshd_config; ufw allow $p/tcp; echo -e "${GREEN}已改端口并在防火墙放行${NC}" ;;
-        2) sed -i "s/^#\?PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config; echo -e "${GREEN}已禁用密码登录${NC}" ;;
+        1) read -p "新端口: " p; sed -i "s/^#\?Port.*/Port $p/" /etc/ssh/sshd_config; ufw allow $p/tcp; echo -e "${GREEN}完成${NC}" ;;
+        2) sed -i "s/^#\?PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config; echo -e "${GREEN}密码已禁用${NC}" ;;
         3) systemctl restart ssh && echo -e "${GREEN}已重启${NC}" ;;
     esac
 }
 
 # --- 6. 防火墙管理 ---
 function manage_ufw() {
-    echo -e "${YELLOW}--- 防火墙管理 [状态: $(ufw status | head -n1 | grep -q "active" && echo -e "${GREEN}开启${NC}" || echo -e "${RED}关闭${NC}")] ---${NC}"
+    echo -e "${YELLOW}--- 防火墙管理 [状态: $(get_ufw_status)] ---${NC}"
     ssh_port=$(ss -tlnp | grep sshd | awk '{print $4}' | cut -d: -f2 | head -n1)
-    echo -e "1. 启用防火墙\n2. 放行端口\n3. 禁用端口\n4. 关闭防火墙\n5. 查看详细规则"
+    echo -e "1. 启用防火墙\n2. 关闭防火墙\n3. 放行端口\n4. 禁用端口\n5. 查看详细规则"
     read -p "选择: " opt
     case $opt in
-        1) ufw allow "$ssh_port"/tcp; ufw --force enable; echo -e "${GREEN}开启成功，已保护端口 $ssh_port${NC}" ;;
-        2) echo -e "${YELLOW}示例: 80/tcp 或 53/udp${NC}"; read -p "输入端口/协议: " p; ufw allow $p ;;
-        3) read -p "输入规则: " p; [[ "$p" != *"$ssh_port"* ]] && ufw delete allow $p ;;
-        4) ufw disable ;;
+        1) ufw allow "$ssh_port"/tcp; ufw --force enable ;;
+        2) ufw disable ;;
+        3) echo -e "${YELLOW}示例: 80/tcp${NC}"; read -p "输入端口/协议: " p; ufw allow $p ;;
+        4) read -p "输入要禁用的: " p; [[ "$p" != *"$ssh_port"* ]] && ufw delete allow $p ;;
         5) ufw status verbose ;;
     esac
 }
 
 # --- 7. Fail2Ban ---
 function manage_f2b() {
-    echo -e "${YELLOW}--- Fail2Ban 防御 [状态: $(get_status fail2ban)] ---${NC}"
-    echo -e "1. 安装并开启基础防御\n2. 查看封禁列表\n3. 解封 IP\n4. 卸载 Fail2Ban"
+    echo -e "${YELLOW}--- Fail2Ban 防御 [状态: $(get_f2b_status)] ---${NC}"
+    echo -e "1. 安装/重置防御配置\n2. 查看封禁列表\n3. 停止/开启服务\n4. 解封 IP\n5. 卸载 Fail2Ban"
     read -p "选择: " opt
     case $opt in
         1) 
-            apt install -y fail2ban
+            apt install -y fail2ban > /dev/null 2>&1
             cat > /etc/fail2ban/jail.local <<EOF
 [sshd]
 enabled = true
@@ -124,13 +133,19 @@ port = ssh
 maxretry = 3
 bantime = 86400
 EOF
-            systemctl enable fail2ban
             systemctl restart fail2ban
-            echo -e "${GREEN}防御已开启 (3次错封24小时)${NC}" 
+            echo -e "${GREEN}防御配置已生效${NC}" 
             ;;
         2) fail2ban-client status sshd ;;
-        3) read -p "输入要解封的 IP: " ip; fail2ban-client set sshd unbanip $ip ;;
-        4) systemctl stop fail2ban; apt purge -y fail2ban; echo -e "${YELLOW}已卸载${NC}" ;;
+        3) 
+            if systemctl is-active --quiet fail2ban; then
+                systemctl stop fail2ban && echo -e "${YELLOW}Fail2Ban 已停止${NC}"
+            else
+                systemctl start fail2ban && echo -e "${GREEN}Fail2Ban 已启动${NC}"
+            fi
+            ;;
+        4) read -p "输入 IP: " ip; fail2ban-client set sshd unbanip $ip ;;
+        5) systemctl stop fail2ban; apt purge -y fail2ban; echo -e "${YELLOW}已卸载${NC}" ;;
     esac
 }
 
@@ -154,5 +169,5 @@ while true; do
         5) update_script ;;
         0) exit 0 ;;
     esac
-    read -p "按回车返回主菜单..."
+    read -p "回车继续..."
 done
