@@ -19,7 +19,6 @@ function check_env() {
         echo -e "${RED}错误：请使用 root 用户运行！${NC}"
         exit 1
     fi
-    # 自动配置系统级快捷键
     if [[ "$0" != "/usr/local/bin/sm" ]]; then
         cp "$0" /usr/local/bin/sm
         chmod +x /usr/local/bin/sm
@@ -36,22 +35,24 @@ get_f2b_status() {
     systemctl is-active --quiet fail2ban && echo -e "${GREEN}运行中${NC}" || echo -e "${RED}已停止${NC}"
 }
 
-# --- 2. 脚本使用说明菜单 ---
+get_docker_fix_status() {
+    if [ -f "/etc/docker/daemon.json" ] && grep -q '"iptables": false' /etc/docker/daemon.json; then
+        echo -e "${GREEN}已加固${NC}"
+    else
+        echo -e "${YELLOW}默认/未加固${NC}"
+    fi
+}
+
+# --- 2. 脚本使用说明 ---
 function show_help() {
     clear
     echo -e "${BLUE}==================================================${NC}"
-    echo -e "         ${YELLOW}[SM] 脚本快捷操作与说明${NC}"
+    echo -e "         ${YELLOW}[SM] 脚本使用说明${NC}"
     echo -e "${BLUE}==================================================${NC}"
-    echo -e "${CYAN}1. 快捷调取：${NC}"
-    echo -e "   安装后在任何目录下输入 ${YELLOW}sm${NC} 或 ${YELLOW}SM${NC} 即可启动。"
-    echo -e ""
-    echo -e "${CYAN}2. 核心逻辑：${NC}"
-    echo -e "   - ${GREEN}防火墙${NC}：启用时会自动放行当前的 SSH 端口，防止失联。"
-    echo -e "   - ${GREEN}Docker加固${NC}：解决 Docker 自动修改规则绕过防火墙的漏洞。"
-    echo -e "   - ${GREEN}Fail2Ban${NC}：默认配置为 3 次密码错误封禁 24 小时。"
-    echo -e ""
-    echo -e "${CYAN}3. 更新与维护：${NC}"
-    echo -e "   选择菜单 [5] 即可同步您在 GitHub 上的最新修改。"
+    echo -e "1. 快捷调取：输入 ${YELLOW}sm${NC} 或 ${YELLOW}SM${NC} 即可启动。"
+    echo -e "2. Docker加固：开启后 Docker 不再自动修改防火墙规则，"
+    echo -e "   所有端口必须通过 UFW 手动放行，安全性最高。"
+    echo -e "3. 恢复默认：如果 Docker 容器无法上网，请尝试关闭加固。"
     echo -e "${BLUE}==================================================${NC}"
     read -p "按回车返回主菜单..."
 }
@@ -68,19 +69,17 @@ function show_sys_info() {
     echo -e "主机名称:   $(hostname)"
     echo -e "系统版本:   $(lsb_release -d | cut -f2- 2>/dev/null || echo "Debian/Ubuntu")"
     echo -e "内存状态:   $(free -m | awk 'NR==2{printf "已用 %sMB / 总共 %sMB", $3,$2}')"
-    
     [[ "$ipv4" != "无" ]] && echo -e "公网 IPv4:  ${CYAN}$ipv4${NC}"
     [[ "$ipv6" != "无" ]] && echo -e "公网 IPv6:  ${CYAN}$ipv6${NC}"
-
     echo -e "${BLUE}--------------------------------------------------${NC}"
-    echo -e "防火墙状态: $(get_ufw_status)"
-    echo -e "防爆破状态: $(get_f2b_status)"
+    echo -e "防火墙状态: $(get_ufw_status)      防爆破状态: $(get_f2b_status)"
+    echo -e "Docker加固: $(get_docker_fix_status)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
     echo -e "${GREEN}快捷指令: ${YELLOW}sm${GREEN} / ${YELLOW}SM${NC}"
     echo -e "${BLUE}==================================================${NC}"
 }
 
-# --- 功能函数集 ---
+# --- 4. 功能函数集 ---
 function update_script() {
     echo -e "${YELLOW}正在从 GitHub 获取最新版本...${NC}"
     wget -qO /usr/local/bin/sm https://raw.githubusercontent.com/shangsc-max/vps-toolbox/main/toolbox.sh
@@ -104,56 +103,75 @@ function github_key() {
 }
 
 function manage_ssh() {
-    echo -e "${YELLOW}--- SSH 管理 ---${NC}"
-    echo -e "1. 修改 SSH 端口\n2. 禁用密码登录\n3. 重启 SSH 服务"
-    read -p "选择: " opt
-    case $opt in
-        1) read -p "新端口: " p; sed -i "s/^#\?Port.*/Port $p/" /etc/ssh/sshd_config; ufw allow $p/tcp; echo -e "${GREEN}端口已改并放行${NC}" ;;
-        2) sed -i "s/^#\?PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config; echo -e "${GREEN}密码登录已禁用${NC}" ;;
-        3) systemctl restart ssh && echo -e "${GREEN}服务已重启${NC}" ;;
-    esac
+    while true; do
+        clear
+        echo -e "${YELLOW}--- SSH 安全管理 ---${NC}"
+        echo -e "1. 修改 SSH 端口\n2. 禁用密码登录\n3. 重启 SSH 服务\n0. 返回主菜单"
+        read -p "选择操作: " opt
+        case $opt in
+            1) read -p "新端口: " p; sed -i "s/^#\?Port.*/Port $p/" /etc/ssh/sshd_config; ufw allow $p/tcp; echo -e "${GREEN}完成${NC}" ; sleep 1 ;;
+            2) sed -i "s/^#\?PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config; echo -e "${GREEN}密码已禁用${NC}" ; sleep 1 ;;
+            3) systemctl restart ssh && echo -e "${GREEN}已重启${NC}" ; sleep 1 ;;
+            0) break ;;
+        esac
+    done
 }
 
 function manage_ufw() {
-    echo -e "${YELLOW}--- 防火墙管理 [状态: $(get_ufw_status)] ---${NC}"
-    ssh_port=$(ss -tlnp | grep sshd | awk '{print $4}' | cut -d: -f2 | head -n1)
-    echo -e "1. 启用防火墙\n2. 关闭防火墙\n3. 放行端口 (示例: 80/tcp)\n4. 禁用端口\n5. ${RED}修复 Docker 绕过防火墙漏洞${NC}\n6. 查看详细规则"
-    read -p "选择: " opt
-    case $opt in
-        1) ufw allow "$ssh_port"/tcp; ufw --force enable ;;
-        2) ufw disable ;;
-        3) read -p "输入端口/协议: " p; ufw allow $p ;;
-        4) read -p "输入端口/协议: " p; [[ "$p" != *"$ssh_port"* ]] && ufw delete allow $p ;;
-        5) 
-            if [ ! -d "/etc/docker" ]; then mkdir -p /etc/docker; fi
-            cat > /etc/docker/daemon.json <<EOF
-{"iptables": false}
-EOF
-            systemctl restart docker
-            echo -e "${GREEN}Docker 安全加固完成！${NC}"
-            ;;
-        6) ufw status verbose ;;
-    esac
+    while true; do
+        clear
+        echo -e "${YELLOW}--- 防火墙管理 [状态: $(get_ufw_status)] ---${NC}"
+        ssh_port=$(ss -tlnp | grep sshd | awk '{print $4}' | cut -d: -f2 | head -n1)
+        echo -e "1. 启用防火墙\n2. 关闭防火墙\n3. 放行端口 (如: 80/tcp)\n4. 禁用端口"
+        echo -e "5. ${GREEN}开启 Docker 安全加固${NC}\n6. ${RED}关闭 Docker 加固 (恢复默认)${NC}\n7. 查看详细规则\n0. 返回主菜单"
+        echo -e "--------------------"
+        read -p "选择操作: " opt
+        case $opt in
+            1) ufw allow "$ssh_port"/tcp; ufw --force enable ; sleep 1 ;;
+            2) ufw disable ; sleep 1 ;;
+            3) read -p "输入端口/协议: " p; ufw allow $p ;;
+            4) read -p "输入端口/协议: " p; [[ "$p" != *"$ssh_port"* ]] && ufw delete allow $p ;;
+            5) 
+                [ ! -d "/etc/docker" ] && mkdir -p /etc/docker
+                echo -e '{\n  "iptables": false\n}' > /etc/docker/daemon.json
+                systemctl restart docker
+                echo -e "${GREEN}Docker 加固已开启！${NC}" ; sleep 1 ;;
+            6) 
+                if [ -f "/etc/docker/daemon.json" ]; then
+                    rm /etc/docker/daemon.json
+                    systemctl restart docker
+                    echo -e "${YELLOW}Docker 加固已关闭，恢复系统默认。${NC}"
+                else
+                    echo -e "当前已是默认状态。"
+                fi ; sleep 1 ;;
+            7) ufw status verbose; read -p "按回车继续..." ;;
+            0) break ;;
+        esac
+    done
 }
 
 function manage_f2b() {
-    echo -e "${YELLOW}--- Fail2Ban 防御 [状态: $(get_f2b_status)] ---${NC}"
-    echo -e "1. 安装/重置配置\n2. 查看封禁列表\n3. 停止/启动服务\n4. 解封 IP\n5. 卸载"
-    read -p "选择: " opt
-    case $opt in
-        1) apt install -y fail2ban > /dev/null 2>&1; systemctl restart fail2ban; echo -e "${GREEN}配置已生效${NC}" ;;
-        2) fail2ban-client status sshd ;;
-        3) systemctl is-active --quiet fail2ban && systemctl stop fail2ban || systemctl start fail2ban ;;
-        4) read -p "输入 IP: " ip; fail2ban-client set sshd unbanip $ip ;;
-        5) systemctl stop fail2ban; apt purge -y fail2ban ;;
-    esac
+    while true; do
+        clear
+        echo -e "${YELLOW}--- Fail2Ban 防御 [状态: $(get_f2b_status)] ---${NC}"
+        echo -e "1. 安装/重置配置\n2. 查看封禁列表\n3. 停止/启动服务\n4. 解封 IP\n5. 卸载 Fail2Ban\n0. 返回主菜单"
+        read -p "选择操作: " opt
+        case $opt in
+            1) apt install -y fail2ban > /dev/null 2>&1; systemctl restart fail2ban; echo -e "${GREEN}配置已生效${NC}"; sleep 1 ;;
+            2) fail2ban-client status sshd; read -p "按回车继续..." ;;
+            3) systemctl is-active --quiet fail2ban && systemctl stop fail2ban || systemctl start fail2ban ; sleep 1 ;;
+            4) read -p "输入 IP: " ip; fail2ban-client set sshd unbanip $ip ;;
+            5) systemctl stop fail2ban; apt purge -y fail2ban; echo -e "${YELLOW}已卸载${NC}"; sleep 1 ;;
+            0) break ;;
+        esac
+    done
 }
 
 # --- 主循环 ---
 check_env
 while true; do
     show_sys_info
-    echo -e "${CYAN}0. 脚本使用说明 & 快捷指令${NC}"
+    echo -e "${CYAN}0. 脚本使用说明${NC}"
     echo -e "1. GitHub 拉取密钥"
     echo -e "2. SSH 管理"
     echo -e "3. 防火墙管理"
@@ -164,12 +182,11 @@ while true; do
     read -p "请输入数字选择功能: " choice
     case $choice in
         0) show_help ;;
-        1) github_key ;;
+        1) github_key; read -p "回车返回..." ;;
         2) manage_ssh ;;
         3) manage_ufw ;;
         4) manage_f2b ;;
         5) update_script ;;
         q) exit 0 ;;
     esac
-    read -p "回车返回菜单..."
 done
