@@ -48,13 +48,26 @@ get_f2b_status() {
 # --- 2. 系统信息显示 ---
 function show_sys_info() {
     clear
+    # 获取本地 IPv4
+    ipv4=$(curl -s4 ifconfig.me || echo "无")
+    # 获取本地 IPv6
+    ipv6=$(curl -s6 ifconfig.me || echo "无")
+
     echo -e "${BLUE}==================================================${NC}"
     echo -e "         ${YELLOW}[SM]${NC} ${GREEN}Shang-Max VPS 全能工具箱${NC}"
     echo -e "${BLUE}==================================================${NC}"
     echo -e "主机名称:   $(hostname)"
     echo -e "系统版本:   $(lsb_release -d | cut -f2- 2>/dev/null || echo "Debian/Ubuntu")"
     echo -e "内存状态:   $(free -m | awk 'NR==2{printf "已用 %sMB / 总共 %sMB", $3,$2}')"
-    echo -e "公网 IP:    $(curl -s ifconfig.me)"
+    
+    # 智能显示 IP
+    if [ "$ipv4" != "无" ]; then
+        echo -e "公网 IPv4:  ${CYAN}$ipv4${NC}"
+    fi
+    if [ "$ipv6" != "无" ]; then
+        echo -e "公网 IPv6:  ${CYAN}$ipv6${NC}"
+    fi
+
     echo -e "${BLUE}--------------------------------------------------${NC}"
     echo -e "防火墙状态: $(get_ufw_status)"
     echo -e "防爆破状态: $(get_f2b_status)"
