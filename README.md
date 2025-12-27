@@ -1,7 +1,4 @@
-# VPS 工具箱
-
-作者：shang-max
-
-## 一键使用
-wget -N https://raw.githubusercontent.com/shang-max/vps-toolbox/main/toolbox.sh && chmod +x toolbox.sh && ./toolbox.sh
-
+功能,说明
+🔑 GitHub 密钥,告别繁琐的公钥复制，输入用户名即可
+🛡️ 安全防御,集成 Fail2Ban 和 UFW，防止暴力破解
+⚙️ SSH 优化,一键改端口，禁止密码登录
