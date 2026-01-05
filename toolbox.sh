@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ====================================================
-# 脚本名称: [SM] Shang-Max VPS 工具箱 (增强修复版)
+# 脚本名称: [SM] Shang-Max VPS 工具箱 (GitHub 旗舰增强版)
 # 作者: Shang-Max
 # GitHub: https://github.com/shangsc-max/vps-toolbox
 # ====================================================
@@ -13,39 +13,37 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# --- 1. 核心工具函数：智能安装 (解决锁占用、自动重试) ---
+# --- 1. 核心工具函数：智能安装 (解决 dpkg 锁占用与服务异常) ---
 smart_apt() {
     local pkg=$1
     echo -e "${CYAN}正在检测并安装依赖: $pkg ...${NC}"
     
-    # 第一次尝试安装
+    # 强制清理可能存在的残留锁
+    rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
+    dpkg --configure -a >/dev/null 2>&1
+
+    # 尝试安装
     if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg"; then
         return 0
     else
-        echo -e "${YELLOW}检测到系统锁占用或配置中断，正在执行自动修复...${NC}"
-        # 强制清理锁文件并修复中断的配置
-        rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
-        dpkg --configure -a
+        echo -e "${YELLOW}首次安装失败，尝试更新源并重试...${NC}"
         apt-get update
-        
-        # 第二次尝试安装
-        echo -e "${CYAN}修复完成，正在重新安装 $pkg ...${NC}"
         if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg"; then
             return 0
         else
-            echo -e "${RED}严重错误：无法安装 $pkg。请手动执行 'sudo apt install $pkg' 查看具体原因。${NC}"
+            echo -e "${RED}严重错误：无法安装 $pkg。请手动执行 'sudo apt install $pkg' 查看错误。${NC}"
             return 1
         fi
     fi
 }
 
-# --- 2. 环境自检 ---
+# --- 2. 环境自检 & 快捷键 ---
 function check_env() {
     if [[ $EUID -ne 0 ]]; then
         echo -e "${RED}错误：请使用 root 用户运行！${NC}"
         exit 1
     fi
-    # 快捷键配置
+    # 自动配置系统快捷键
     if [[ "$0" != "/usr/local/bin/sm" ]]; then
         cp "$0" /usr/local/bin/sm
         chmod +x /usr/local/bin/sm
@@ -82,7 +80,7 @@ function manage_f2b() {
         clear
         echo -e "${YELLOW}--- Fail2Ban 防御管理 [状态: $(get_f2b_status)] ---${NC}"
         echo -e "1. 安装/重置 Fail2Ban"
-        echo -e "2. 查看 SSH 封禁列表 (仅运行中可用)"
+        echo -e "2. 查看 SSH 封禁列表"
         echo -e "3. 启动/停止 服务"
         echo -e "0. 返回主菜单"
         read -p "选择操作: " opt
@@ -92,13 +90,13 @@ function manage_f2b() {
                     systemctl unmask fail2ban
                     systemctl enable fail2ban
                     systemctl restart fail2ban
-                    echo -e "${GREEN}Fail2Ban 配置并启动成功！${NC}"
+                    echo -e "${GREEN}Fail2Ban 配置并开启成功${NC}"
                 fi; sleep 2 ;;
             2) 
                 if systemctl is-active --quiet fail2ban; then
                     fail2ban-client status sshd
                 else
-                    echo -e "${RED}错误：Fail2Ban 未运行，无法查看封禁列表。${NC}"
+                    echo -e "${RED}服务未运行，无法查看列表。请先执行选项 1 安装或选项 3 启动。${NC}"
                 fi; read -p "回车继续..." ;;
             3) 
                 if systemctl is-active --quiet fail2ban; then
@@ -117,16 +115,17 @@ function manage_ufw() {
         echo -e "${YELLOW}--- 防火墙管理 [状态: $(get_ufw_status)] ---${NC}"
         echo -e "1. 安装/重置 UFW"
         echo -e "2. 启用防火墙 (自动放行 SSH)"
-        echo -p "0. 返回主菜单"
+        echo -e "3. 关闭防火墙"
+        echo -e "0. 返回主菜单"
         read -p "选择操作: " opt
         case $opt in
-            1) smart_apt "ufw" && echo -e "${GREEN}UFW 安装成功${NC}"; sleep 1 ;;
+            1) smart_apt "ufw" && echo -e "${GREEN}安装完成${NC}"; sleep 1 ;;
             2) 
                 ssh_port=$(ss -tlnp | grep sshd | awk '{print $4}' | cut -d: -f2 | head -n1)
                 [[ -z "$ssh_port" ]] && ssh_port=22
-                ufw allow "$ssh_port"/tcp
-                ufw --force enable && echo -e "${GREEN}防火墙已启动，SSH 端口 $ssh_port 已放行${NC}"
-                sleep 2 ;;
+                ufw allow "$ssh_port"/tcp && ufw --force enable
+                echo -e "${GREEN}防火墙已启动，放行 SSH 端口: $ssh_port${NC}"; sleep 2 ;;
+            3) ufw disable; sleep 1 ;;
             0) break ;;
         esac
     done
@@ -142,21 +141,19 @@ while true; do
     echo -e "--------------------------------------------------"
     read -p "请输入数字选择: " choice
     case "$choice" in
-        1) # 简单调用 SSH 修改
-           read -p "输入新端口: " p; sed -i "s/^#\?Port.*/Port $p/" /etc/ssh/sshd_config; systemctl restart ssh; echo -e "${GREEN}SSH 端口已改为 $p${NC}"; sleep 1 ;;
+        1) read -p "输入新端口: " p; sed -i "s/^#\?Port.*/Port $p/" /etc/ssh/sshd_config; systemctl restart ssh; echo -e "${GREEN}端口已改为 $p${NC}"; sleep 1 ;;
         2) manage_ufw ;;
         3) manage_f2b ;;
         4) read -p "GitHub 用户: " gu; wget -qO- https://github.com/$gu.keys >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys; echo -e "${GREEN}密钥同步完成${NC}"; sleep 1 ;;
         5) 
-            echo -e "${YELLOW}正在更新脚本并重新载入...${NC}"
+            echo -e "${YELLOW}正在更新脚本...${NC}"
             if wget -qO /usr/local/bin/sm https://raw.githubusercontent.com/shangsc-max/vps-toolbox/main/toolbox.sh; then
                 chmod +x /usr/local/bin/sm
                 echo -e "${GREEN}更新成功！正在自动重启...${NC}"
                 sleep 1
                 exec sm
             else
-                echo -e "${RED}更新失败，请检查网络。${NC}"
-                sleep 2
+                echo -e "${RED}更新失败，请检查网络连接！${NC}"; sleep 2
             fi ;;
         q) exit 0 ;;
     esac
