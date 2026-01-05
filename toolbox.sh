@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # ====================================================
-# 脚本名称: [SM] Shang-Max VPS 工具箱 (全功能旗舰版)
+# 脚本名称: [SM] Shang-Max VPS 工具箱 (优化修复版)
 # 作者: Shang-Max
-# GitHub: https://github.com/shangsc-max/vps-toolbox
 # ====================================================
 
 RED='\033[0;31m'
@@ -19,6 +18,14 @@ function check_env() {
         echo -e "${RED}错误：请使用 root 用户运行！${NC}"
         exit 1
     fi
+
+    # 检查系统锁状态，提前预警
+    if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️  警告: 系统安装程序 (apt/dpkg) 正在被占用。${NC}"
+        echo -e "${YELLOW}脚本内的安装功能可能会失败。建议等待后台更新完成或手动解锁。${NC}"
+        echo -e "${BLUE}--------------------------------------------------${NC}"
+    fi
+
     # 自动配置系统快捷键
     if [[ "$0" != "/usr/local/bin/sm" ]]; then
         cp "$0" /usr/local/bin/sm
@@ -48,7 +55,7 @@ get_docker_fix_status() {
 function show_help() {
     clear
     echo -e "${BLUE}==================================================${NC}"
-    echo -e "         ${YELLOW}[SM] 脚本使用说明${NC}"
+    echo -e "          ${YELLOW}[SM] 脚本使用说明${NC}"
     echo -e "${BLUE}==================================================${NC}"
     echo -e "1. 快捷调取：输入 ${YELLOW}sm${NC} 或 ${YELLOW}SM${NC} 即可启动。"
     echo -e "2. 逻辑说明：子菜单输入 ${YELLOW}0${NC} 返回上一级，主菜单输入 ${YELLOW}q${NC} 退出。"
@@ -64,7 +71,7 @@ function show_sys_info() {
     ipv6=$(curl -s6 --connect-timeout 2 ifconfig.me || echo "无")
 
     echo -e "${BLUE}==================================================${NC}"
-    echo -e "         ${YELLOW}[SM]${NC} ${GREEN}Shang-Max VPS 全能工具箱${NC}"
+    echo -e "          ${YELLOW}[SM]${NC} ${GREEN}Shang-Max VPS 全能工具箱${NC}"
     echo -e "${BLUE}==================================================${NC}"
     echo -e "主机名称:   $(hostname)"
     echo -e "系统版本:   $(lsb_release -d | cut -f2- 2>/dev/null || echo "Debian/Ubuntu")"
@@ -115,7 +122,14 @@ function manage_ufw() {
         echo -e "0. 返回主菜单"
         read -p "选择操作: " opt
         case $opt in
-            1) apt update && apt install -y ufw; echo -e "${GREEN}安装完成${NC}"; sleep 1 ;;
+            1) 
+                echo -e "${CYAN}正在更新并安装 UFW...${NC}"
+                if apt update && apt install -y ufw; then
+                    echo -e "${GREEN}安装完成${NC}"
+                else
+                    echo -e "${RED}安装失败！请检查系统锁是否被占用。${NC}"
+                fi
+                sleep 2 ;;
             2) ufw allow "$ssh_port"/tcp; ufw --force enable; echo -e "${GREEN}已开启${NC}"; sleep 1 ;;
             3) ufw disable; sleep 1 ;;
             4) read -p "输入端口/协议: " p; ufw allow $p ;;
@@ -145,9 +159,16 @@ function manage_f2b() {
         read -p "选择操作: " opt
         case $opt in
             1) 
-                DEBIAN_FRONTEND=noninteractive apt install -y fail2ban > /dev/null
-                systemctl unmask fail2ban && systemctl enable fail2ban && systemctl restart fail2ban
-                echo -e "${GREEN}安装并开启成功${NC}"; sleep 1 ;;
+                echo -e "${CYAN}正在尝试安装 Fail2Ban...${NC}"
+                if DEBIAN_FRONTEND=noninteractive apt install -y fail2ban; then
+                    systemctl unmask fail2ban && systemctl enable fail2ban && systemctl restart fail2ban
+                    echo -e "${GREEN}安装并开启成功${NC}"
+                else
+                    echo -e "${RED}安装失败！${NC}"
+                    echo -e "${YELLOW}原因可能是：1. 系统锁被占用  2. 软件源问题${NC}"
+                    echo -e "请尝试手动运行: sudo rm /var/lib/dpkg/lock-frontend"
+                fi
+                sleep 2 ;;
             2) fail2ban-client status sshd; read -p "回车继续..." ;;
             3) systemctl is-active --quiet fail2ban && systemctl stop fail2ban || systemctl start fail2ban; sleep 1 ;;
             4) read -p "输入 IP: " ip; fail2ban-client set sshd unbanip $ip; sleep 1 ;;
