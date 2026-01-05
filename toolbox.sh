@@ -79,31 +79,32 @@ function manage_f2b() {
     while true; do
         clear
         echo -e "${YELLOW}--- Fail2Ban 防御管理 [状态: $(get_f2b_status)] ---${NC}"
-        echo -e "1. 安装/重置 Fail2Ban"
+        echo -e "1. 安装/重置 Fail2Ban (含强制修复)"
         echo -e "2. 查看 SSH 封禁列表"
         echo -e "3. 启动/停止 服务"
         echo -e "0. 返回主菜单"
         read -p "选择操作: " opt
         case $opt in
             1) 
+                # 强化修复逻辑
+                echo -e "${CYAN}正在执行强制修复与安装...${NC}"
+                rm -f /var/lib/dpkg/lock* /var/run/fail2ban/fail2ban.sock
+                dpkg --configure -a
                 if smart_apt "fail2ban"; then
-                    systemctl unmask fail2ban
-                    systemctl enable fail2ban
+                    systemctl unmask fail2ban >/dev/null 2>&1
+                    systemctl enable fail2ban >/dev/null 2>&1
                     systemctl restart fail2ban
-                    echo -e "${GREEN}Fail2Ban 配置并开启成功${NC}"
+                    echo -e "${GREEN}强制修复并启动成功！${NC}"
                 fi; sleep 2 ;;
             2) 
                 if systemctl is-active --quiet fail2ban; then
                     fail2ban-client status sshd
                 else
-                    echo -e "${RED}服务未运行，无法查看列表。请先执行选项 1 安装或选项 3 启动。${NC}"
+                    echo -e "${RED}错误：服务未运行。请先选 1 执行强制修复。${NC}"
                 fi; read -p "回车继续..." ;;
             3) 
-                if systemctl is-active --quiet fail2ban; then
-                    systemctl stop fail2ban && echo -e "${YELLOW}服务已停止${NC}"
-                else
-                    systemctl start fail2ban && echo -e "${GREEN}服务已启动${NC}"
-                fi; sleep 1 ;;
+                systemctl is-active --quiet fail2ban && systemctl stop fail2ban || systemctl start fail2ban
+                sleep 1 ;;
             0) break ;;
         esac
     done
